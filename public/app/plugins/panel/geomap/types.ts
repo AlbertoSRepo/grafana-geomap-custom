@@ -13,6 +13,7 @@ import { StyleConfig } from './style/types';
 
 export interface ControlsOptions extends ControlsOptionsBase {
   scaleUnits?: Units;
+  showCustomControl?: boolean;
 }
 
 export interface FeatureStyleConfig {

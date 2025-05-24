@@ -12,6 +12,8 @@ import {
   GrafanaTheme2,
   FrameGeometrySourceMode,
   EventBus,
+  Field,
+  FieldType,
 } from '@grafana/data';
 import { FrameVectorSource } from 'app/features/geo/utils/frameVectorSource';
 import { getLocationMatchers } from 'app/features/geo/utils/location';
@@ -21,17 +23,21 @@ import { ObservablePropsWrapper } from '../../components/ObservablePropsWrapper'
 import { StyleEditor } from '../../editor/StyleEditor';
 import { defaultStyleConfig, StyleConfig } from '../../style/types';
 import { getStyleConfigState } from '../../style/utils';
-import { getStyleDimension} from '../../utils/utils';
+import { getStyleDimension } from '../../utils/utils';
 
 // Configuration options for Circle overlays
 export interface MarkersConfig {
   style: StyleConfig;
   showLegend?: boolean;
+  showCustomControl?: boolean;
+  searchField?: string;
 }
 
 const defaultOptions: MarkersConfig = {
   style: defaultStyleConfig,
   showLegend: true,
+  showCustomControl: false,
+  searchField: undefined,  // Cambia da 'name' a undefined
 };
 
 export const MARKERS_LAYER_ID = 'markers';
@@ -76,7 +82,7 @@ export const markersLayer: MapLayerRegistryItem<MarkersConfig> = {
     const source = new FrameVectorSource(location);
     const vectorLayer = new VectorImage({
       source,
-      declutter: false // TODO consider making this an option or explore grouping strategies
+      declutter: false
     });
 
     const legendProps = new ReplaySubject<MarkersLegendProps>(1);
@@ -86,11 +92,10 @@ export const markersLayer: MapLayerRegistryItem<MarkersConfig> = {
     }
 
     if (!style.fields) {
-      // Set a global style
       vectorLayer.setStyle(style.maker(style.base));
     } else {
       vectorLayer.setStyle((feature: FeatureLike) => {
-        const idx: number = feature.get('rowIndex');
+        const idx = feature.get('rowIndex');
         const dims = style.dims;
         if (!dims || !isNumber(idx)) {
           return style.maker(style.base);
@@ -119,14 +124,12 @@ export const markersLayer: MapLayerRegistryItem<MarkersConfig> = {
       legend: legend,
       update: (data: PanelData) => {
         if (!data.series?.length) {
-          source.clear();
-          return; // ignore empty
+          return;
         }
 
         for (const frame of data.series) {
           style.dims = getStyleDimension(frame, style, theme);
 
-          // Post updates to the legend component
           if (legend) {
             legendProps.next({
               styleConfig: style,
@@ -137,8 +140,13 @@ export const markersLayer: MapLayerRegistryItem<MarkersConfig> = {
           }
 
           source.update(frame);
-          break; // Only the first frame for now!
+          
+          break; // Solo il primo frame per ora
         }
+      },
+
+      dispose: () => {
+        // Rimosso il codice relativo a customControl
       },
 
       // Marker overlay options
@@ -159,6 +167,38 @@ export const markersLayer: MapLayerRegistryItem<MarkersConfig> = {
             name: 'Show legend',
             description: 'Show map legend',
             defaultValue: defaultOptions.showLegend,
+          })
+          .addBooleanSwitch({
+            path: 'config.showCustomControl',
+            name: 'Show search control',
+            description: 'Show search button in the map',
+            defaultValue: defaultOptions.showCustomControl,
+          })
+          .addCustomEditor({
+            id: 'config.searchFieldWarning',
+            path: 'config.searchFieldWarning',
+            name: '',
+            editor: function SearchFieldRequiredWarning({ context }) {
+              const { showCustomControl, searchField } = context.options?.config || {};
+              if (showCustomControl && !searchField) {
+                return <div style={{ color: 'orange' }}>Please select a search field below</div>;
+              }
+              return null;
+            },
+            showIf: (config) => !!(config as MapLayerOptions<MarkersConfig>).config?.showCustomControl,
+          })
+          .addFieldNamePicker({
+            path: 'config.searchField',
+            name: 'Search field',
+            description: 'Select the field to search in',
+            settings: {
+              filter: (f: Field) => f.type === FieldType.string, // Solo campi stringa
+              noFieldsMessage: 'No string fields found',
+              placeholderText: 'Select field for search',
+              required: true, // Aggiungi questa riga per renderlo obbligatorio
+            },
+            defaultValue: defaultOptions.searchField,
+            showIf: (config) => !!(config as MapLayerOptions<MarkersConfig>).config?.showCustomControl, // Mostra solo se showCustomControl è true
           });
       },
     };

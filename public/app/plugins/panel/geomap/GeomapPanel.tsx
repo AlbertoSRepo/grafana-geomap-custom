@@ -6,11 +6,15 @@ import ScaleLine from 'ol/control/ScaleLine';
 import Zoom from 'ol/control/Zoom';
 import { Coordinate } from 'ol/coordinate';
 import { isEmpty } from 'ol/extent';
+import Feature, { FeatureLike } from 'ol/Feature';
+import VectorLayer from 'ol/layer/Vector';
 import MouseWheelZoom from 'ol/interaction/MouseWheelZoom';
 import { fromLonLat } from 'ol/proj';
 import { Component, ReactNode } from 'react';
 import * as React from 'react';
 import { Subscription } from 'rxjs';
+import { getUid } from 'ol';
+import { Style } from 'ol/style';
 
 import { DataHoverEvent, PanelData, PanelProps } from '@grafana/data';
 import { config } from '@grafana/runtime';
@@ -24,7 +28,7 @@ import { MeasureOverlay } from './components/MeasureOverlay';
 import { MeasureVectorLayer } from './components/MeasureVectorLayer';
 import { GeomapHoverPayload } from './event';
 import { getGlobalStyles } from './globalStyles';
-import { defaultMarkersConfig } from './layers/data/markersLayer';
+import { defaultMarkersConfig, MARKERS_LAYER_ID, MarkersConfig } from './layers/data/markersLayer';
 import { DEFAULT_BASEMAP_CONFIG } from './layers/registry';
 import { ControlsOptions, Options, MapLayerState, MapViewConfig, TooltipMode } from './types';
 import { getActions } from './utils/actions';
@@ -33,6 +37,8 @@ import { applyLayerFilter, initLayer } from './utils/layers';
 import { pointerClickListener, pointerMoveListener, setTooltipListeners } from './utils/tooltip';
 import { updateMap, getNewOpenLayersMap, notifyPanelEditor } from './utils/utils';
 import { centerPointRegistry, MapCenterID } from './view';
+
+import { CustomControl } from './controls/CustomControl';
 
 // Allows multiple panels to share the same view instance
 let sharedView: View | undefined = undefined;
@@ -130,11 +136,17 @@ export class GeomapPanel extends Component<Props, State> {
         this.map?.addLayer(l);
       }
     });
-    onOptionsChange({
+    
+    const newOptions = {
       ...options,
       basemap: layers[0].options,
       layers: layers.slice(1).map((v) => v.options),
-    });
+    };
+    
+    onOptionsChange(newOptions);
+
+    // Reinizializza i controlli dopo l'aggiornamento delle opzioni
+    this.initControls(options.controls ?? { showZoom: true, showAttribution: true });
 
     notifyPanelEditor(this, layers, selected);
     this.setState({ legends: this.getLegends() });
@@ -158,6 +170,12 @@ export class GeomapPanel extends Component<Props, State> {
     }
 
     if (options.controls !== oldOptions.controls) {
+      this.initControls(options.controls ?? { showZoom: true, showAttribution: true });
+    }
+
+    // Aggiungi questo controllo per gestire i cambiamenti nei layer
+    if (options.layers !== oldOptions.layers || options.basemap !== oldOptions.basemap) {
+      // Reinizializza i controlli quando i layer cambiano
       this.initControls(options.controls ?? { showZoom: true, showAttribution: true });
     }
   }
@@ -267,6 +285,14 @@ export class GeomapPanel extends Component<Props, State> {
     }
 
     this.initViewExtent(view, config);
+    
+    // Add event listener for zoom changes
+    view.on('change:resolution', () => {
+      const zoom = view.getZoom();
+      const scale = Math.pow(2, zoom as number);
+      console.log('Zoom:', zoom, 'Scale:', scale);
+    });
+    
     return view;
   };
 
@@ -322,6 +348,112 @@ export class GeomapPanel extends Component<Props, State> {
 
     if (options.showZoom) {
       this.map.addControl(new Zoom());
+    }
+
+    // Cerca il markers layer con showCustomControl abilitato
+    const markersLayer = this.layers.find(layer => 
+      layer.options.type === MARKERS_LAYER_ID && 
+      layer.options.config && 
+      (layer.options.config as MarkersConfig).showCustomControl
+    );
+
+    // Se troviamo un layer di tipo markers con showCustomControl attivato
+    if (markersLayer && markersLayer.handler) {
+      const config = markersLayer.options.config as MarkersConfig;
+      
+      // Verifica che il campo di ricerca sia definito
+      if (!config.searchField) {
+        console.log('Search field not configured - not adding search control');
+        return; // Non aggiungere il controllo se non è stato selezionato un campo
+      }
+      
+      const searchField = config.searchField;
+      
+      // Ottieni il source del layer markers per accedere alle features
+      const vectorLayer = markersLayer.handler.init() as VectorLayer<any>;
+      const source = vectorLayer.getSource();
+      const features = source ? source.getFeatures() : [];
+      
+      // Ottieni lo stile originale prima di modificarlo
+      const originalStyleFunction = vectorLayer.getStyle();
+      
+      // Funzione per applicare lo stile originale
+      const applyOriginalStyle = (feature: FeatureLike, resolution: number) => {
+        if (typeof originalStyleFunction === 'function') {
+          return originalStyleFunction(feature, resolution);
+        } else if (Array.isArray(originalStyleFunction)) {
+          return originalStyleFunction;
+        }
+        return undefined;
+      };
+      
+      // Funzione per aggiornare la visibilità del layer
+      const updateLayerVisibility = (visibleFeatures: Feature[]) => {
+        // Crea un oggetto Set con gli ID dei feature visibili
+        const visibleIds = new Set();
+        
+        // Usa getUid per ottenere l'ID univoco invece di ol_uid
+        visibleFeatures.forEach(f => {
+          // Usa una proprietà più affidabile per l'identificazione
+          const id = getUid(f); // Importa getUid da 'ol'
+          visibleIds.add(id);
+        });
+        
+        console.log(`Showing ${visibleIds.size} markers out of ${features.length}`);
+        
+        // Applica la funzione di stile modificata
+        vectorLayer.setStyle((feature, resolution) => {
+          const id = getUid(feature);
+          if (visibleIds.has(id)) {
+            // Usa lo stile originale per i feature visibili
+            return applyOriginalStyle(feature, resolution);
+          } else {
+            return new Style({}); // Stile vuoto invece di null per nascondere la feature
+          }
+        });
+      };
+      
+      // Crea il controllo di ricerca
+      const customControl = new CustomControl({
+        searchField: searchField,
+        features: features,
+        onSearchResults: (results, searchTerm) => {
+          console.log(`Search found ${results.length} results for term: "${searchTerm}"`);
+          
+          // Se il termine di ricerca è vuoto, mostra tutti i marker
+          if (!searchTerm) {
+            console.log('Empty search - showing all features');
+            vectorLayer.setStyle(originalStyleFunction);
+            return;
+          }
+          
+          // Se ci sono risultati, mostra solo quelli
+          if (results.length > 0) {
+            console.log(`Showing ${results.length} matching features`);
+            updateLayerVisibility(results);
+          } 
+          // Se non ci sono risultati con un termine di ricerca, nascondi tutti i marker
+          else {
+            console.log('No search results - hiding all features');
+            // Imposta uno stile vuoto per nascondere tutti i marker
+            vectorLayer.setStyle(new Style({}));
+          }
+          
+          // Log per debug
+          if (results.length > 0) {
+            const feature = results[0];
+            const props = feature.getProperties();
+            const frame = props.frame;
+            const rowIndex = props.rowIndex;
+            const field = frame.fields.find((f: any) => f.name === searchField);
+            const value = field ? field.values[rowIndex] : undefined;
+            
+            console.log(`First result: ${value} (at index ${rowIndex})`);
+          }
+        }
+      });
+      
+      this.map.addControl(customControl);
     }
 
     if (options.showScale) {
@@ -419,3 +551,4 @@ const styles = {
     height: '100%',
   }),
 };
+
