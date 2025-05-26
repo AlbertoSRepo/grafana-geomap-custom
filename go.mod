@@ -30,7 +30,7 @@ require (
 	github.com/Masterminds/squirrel v1.5.4 // @grafana/identity-access-team
 	github.com/ProtonMail/go-crypto v0.0.0-20230828082145-3c4c8a2d2371 // @grafana/plugins-platform-backend
 	github.com/VividCortex/mysqlerr v0.0.0-20170204212430-6c6b55f8796f // @grafana/grafana-backend-group
-	github.com/alicebob/miniredis/v2 v2.33.0 // @grafana/alerting-backend
+	github.com/alicebob/miniredis/v2 v2.34.0 // @grafana/alerting-backend
 	github.com/andybalholm/brotli v1.0.6 // @grafana/partner-datasources
 	github.com/apache/arrow/go/v15 v15.0.2 // @grafana/observability-metrics
 	github.com/armon/go-radix v1.0.0 // @grafana/grafana-app-platform-squad
@@ -226,7 +226,7 @@ require (
 	github.com/RoaringBitmap/roaring v1.9.3 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9 // indirect
-	github.com/alicebob/gopher-json v0.0.0-20200520072559-a9ecdc9d1d3a // indirect
+	github.com/alicebob/gopher-json v0.0.0-20230218143504-906a9b012302 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
